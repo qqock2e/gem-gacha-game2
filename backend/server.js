@@ -1,3 +1,204 @@
+const express = require('express');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+const { v4: uuidv4 } = require('uuid');
+
+const app = express();
+const PORT = 3000;
+
+// CORS 설정
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+app.use(bodyParser.json());
+
+// 메모리 데이터베이스
+const users = new Map();
+
+// 보석 데이터
+const gemData = {
+    1: { name: '작은 수정', emoji: '💎', chorus: 1, multiple: 1, lux: 0 },
+    2: { name: '푸른 수정', emoji: '🔷', chorus: 2, multiple: 1, lux: 0 },
+    3: { name: '붉은 수정', emoji: '🔶', chorus: 3, multiple: 1, lux: 0 },
+    4: { name: '에메랄드', emoji: '💚', chorus: 4, multiple: 1, lux: 0 },
+    5: { name: '사파이어', emoji: '💙', chorus: 5, multiple: 1, lux: 0 },
+    6: { name: '루비', emoji: '❤️', chorus: 6, multiple: 1, lux: 0 },
+    7: { name: '자수정', emoji: '💜', chorus: 7, multiple: 1.1, lux: 0 },
+    8: { name: '황금석', emoji: '💛', chorus: 8, multiple: 1.2, lux: 0 },
+    9: { name: '다이아몬드', emoji: '💍', chorus: 9, multiple: 1.3, lux: 0 },
+    10: { name: '오팔', emoji: '🌈', chorus: 10, multiple: 1.4, lux: 0.5 },
+    11: { name: '진주', emoji: '🤍', chorus: 11, multiple: 1.5, lux: 0.8 },
+    12: { name: '토파즈', emoji: '🧡', chorus: 12, multiple: 1.6, lux: 1.0 },
+    13: { name: '별의 조각', emoji: '⭐', chorus: 15, multiple: 2.0, lux: 2.5 },
+    14: { name: '달의 눈물', emoji: '🌙', chorus: 20, multiple: 2.5, lux: 4.0 },
+    15: { name: '태양의 심장', emoji: '☀️', chorus: 25, multiple: 3.0, lux: 5.0 }
+};
+
+// API 엔드포인트들
+
+// 서버 상태 확인
+app.get('/api/ping', (req, res) => {
+    console.log('📡 Ping 요청 받음');
+    res.json({ 
+        success: true, 
+        message: '서버가 정상 작동 중입니다',
+        timestamp: new Date().toISOString()
+    });
+});
+
+// 로그인
+app.post('/api/auth/login', (req, res) => {
+    try {
+        let { userId } = req.body;
+        console.log('🔐 로그인 요청:', userId);
+        
+        if (!userId || !users.has(userId)) {
+            userId = uuidv4();
+            users.set(userId, {
+                points: 1000,
+                prisms: 10,
+                inventory: {},
+                volumes: { multi: false, chorus: false, lux: false },
+                equippedGems: []
+            });
+            console.log('👤 새 사용자 생성:', userId);
+        }
+        
+        res.json({ success: true, userId });
+    } catch (error) {
+        console.error('❌ 로그인 오류:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 게임 데이터 조회
+app.get('/api/user/gamedata/:userId', (req, res) => {
+    try {
+        const { userId } = req.params;
+        const userData = users.get(userId);
+        
+        if (!userData) {
+            return res.status(404).json({ success: false, error: '사용자를 찾을 수 없습니다' });
+        }
+        
+        res.json(userData);
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 포인트 획득
+app.post('/api/user/earn-points', (req, res) => {
+    try {
+        const { userId } = req.body;
+        const userData = users.get(userId);
+        
+        if (!userData) {
+            return res.status(404).json({ success: false, error: '사용자를 찾을 수 없습니다' });
+        }
+        
+        const earnedPoints = Math.floor(Math.random() * 50) + 10;
+        const luxChance = Math.random() < 0.1;
+        
+        userData.points += earnedPoints;
+        let prismsEarned = 0;
+        
+        if (luxChance) {
+            prismsEarned = 1;
+            userData.prisms += 1;
+        }
+        
+        res.json({
+            success: true,
+            earnedPoints,
+            prismsEarned,
+            newPoints: userData.points,
+            newPrisms: userData.prisms
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 뽑기
+app.post('/api/gacha/draw', (req, res) => {
+    try {
+        const { userId, type, count = 1 } = req.body;
+        const userData = users.get(userId);
+        
+        if (!userData) {
+            return res.status(404).json({ success: false, error: '사용자를 찾을 수 없습니다' });
+        }
+        
+        const costs = {
+            beginner: { points: 10, prisms: 0 },
+            normal: { points: 0, prisms: 5 },
+            premium: { points: 0, prisms: 30 },
+            luxury: { points: 0, prisms: 40 }
+        };
+        
+        const cost = costs[type];
+        const totalPointCost = cost.points * count;
+        const totalPrismCost = cost.prisms * count;
+        
+        if (userData.points < totalPointCost || userData.prisms < totalPrismCost) {
+            return res.status(400).json({ success: false, error: '재화가 부족합니다' });
+        }
+        
+        userData.points -= totalPointCost;
+        userData.prisms -= totalPrismCost;
+        
+        const results = [];
+        for (let i = 0; i < count; i++) {
+            const result = performSingleGacha(type);
+            results.push(result);
+            
+            if (!userData.inventory[result.gemId]) {
+                userData.inventory[result.gemId] = 0;
+            }
+            userData.inventory[result.gemId]++;
+        }
+        
+        res.json({
+            success: true,
+            results,
+            newPoints: userData.points,
+            newPrisms: userData.prisms,
+            newInventory: userData.inventory
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 볼륨 구매
+app.post('/api/user/buy-volume', (req, res) => {
+    try {
+        const { userId, type } = req.body;
+        const userData = users.get(userId);
+        
+        if (!userData) {
+            return res.status(404).json({ success: false, error: '사용자를 찾을 수 없습니다' });
+        }
+        
+        if (userData.volumes[type]) {
+            return res.status(400).json({ success: false, error: '이미 보유한 볼륨입니다' });
+        }
+        
+        const volumePrices = {
+            multi: { points: 100000, prisms: 0 },
+            chorus: { points: 55000, prisms: 0 },
+            lux: { points: 0, prisms: 100 }
+        };
+        
+        const price = volumePrices[type];
+        
+        if (userData.points < price.points || userData.prisms < price.prisms) {
+            return res.status(400).json({ success: false, error: '재화가 부족합니다' });
+        }
         
         userData.points -= price.points;
         userData.prisms -= price.prisms;
